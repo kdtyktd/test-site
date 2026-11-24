@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Test Site</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 24px; }
+    h1 { font-size: 18px; }
+    .row { margin: 12px 0; }
+    button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid #888; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>Test Site</h1>
+  <p class="row" id="status">Waiting for the Cryptico bridge…</p>
+  <p class="row" id="value"></p>
+  <p class="row"><button id="close" type="button">ui.close()</button></p>
+  <script>
+    (function () {
+      "use strict";
+      var BRIDGE = 1;
+      function setText(id, t) { var e = document.getElementById(id); if (e) e.textContent = t; }
+      function start(port) {
+        var seq = 0, pending = Object.create(null);
+        port.onmessage = function (ev) {
+          var m = ev.data;
+          if (m && m.type === "res" && pending[m.id]) { var cb = pending[m.id]; delete pending[m.id]; cb(m); }
+        };
+        if (port.start) port.start();
+        function call(method, params) {
+          return new Promise(function (resolve, reject) {
+            var id = "d" + seq++;
+            pending[id] = function (r) { r.ok ? resolve(r.result) : reject(new Error((r.error && r.error.code) || "INTERNAL")); };
+            var req = { cryptico: BRIDGE, id: id, type: "req", method: method };
+            if (params !== undefined) req.params = params;
+            port.postMessage(req);
+          });
+        }
+        call("init")
+          .then(function (i) {
+            setText("status", "init ok — appId " + i.appId + ", granted [" + i.granted.join(", ") + "]");
+            return call("storage.set", { key: "demo", value: "hello-" + Date.now() });
+          })
+          .then(function () { return call("storage.get", { key: "demo" }); })
+          .then(function (r) { setText("value", "storage round-trip: " + (r && r.value)); })
+          .catch(function (e) { setText("status", "bridge error: " + e.message); });
+        document.getElementById("close").addEventListener("click", function () {
+          call("ui.close").catch(function () {});
+        });
+      }
+      window.addEventListener("message", function (ev) {
+        var d = ev.data;
+        if (!d || d.cryptico !== BRIDGE || d.type !== "hello") return;
+        var port = ev.ports && ev.ports[0];
+        if (port) start(port);
+      });
+    })();
+  </script>
+</body>
+</html>
